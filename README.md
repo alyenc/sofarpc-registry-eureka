@@ -17,7 +17,7 @@
 com.alipay.sofa.rpc.registry.address=oss://oss-cn-hangzhou.aliyuncs.com?accessKeyId={yourAccessKeyId}&accessKeySecret={yourAccessKeySecret}&bucketName={yourBucketName}&objectName={yourObjectName}
 ```
 
-##创建Bean
+## 创建Bean
 
 ```java
 @Bean
@@ -27,7 +27,7 @@ public OssRegistryConfigurator ossRegistryConfigurator() {
 }
 ```
 
-##注意事项
+## 注意事项
 - 提前创建bucket
 - 确保accessKey有bucket读写权限
 - bucket需要开启版本控制
