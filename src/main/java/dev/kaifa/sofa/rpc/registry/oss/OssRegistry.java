@@ -6,6 +6,7 @@ import com.alipay.sofa.rpc.common.struct.MapDifference;
 import com.alipay.sofa.rpc.common.struct.ScheduledService;
 import com.alipay.sofa.rpc.common.struct.ValueDifference;
 import com.alipay.sofa.rpc.common.utils.CommonUtils;
+import com.alipay.sofa.rpc.common.utils.IOUtils;
 import com.alipay.sofa.rpc.common.utils.StringUtils;
 import com.alipay.sofa.rpc.config.ConsumerConfig;
 import com.alipay.sofa.rpc.config.ProviderConfig;
@@ -23,9 +24,7 @@ import com.alipay.sofa.rpc.registry.Registry;
 import com.aliyun.oss.*;
 import com.aliyun.oss.model.*;
 
-import java.io.BufferedReader;
-import java.io.ByteArrayInputStream;
-import java.io.InputStreamReader;
+import java.io.*;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -95,32 +94,15 @@ public class OssRegistry extends Registry {
      */
     private String bucketName;
 
-    /**
-     * OSS客户端
-     */
-    private OSS ossClient;
-
     protected OssRegistry(RegistryConfig registryConfig) {
         super(registryConfig);
     }
 
     @Override
     public void init() {
-        if (ossClient != null) {
-            return;
-        }
-
-        //OSS配置
-        String endpoint = registryConfig.getAddress();
-        String accessKeyId = registryConfig.getParameter("accessKeyId");
-        String accessKeySecret = registryConfig.getParameter("accessKeySecret");
-
         // 填写Bucket名称，例如examplebucket。
-        bucketName = registryConfig.getParameter("bucketName");
-        objectName = registryConfig.getParameter("objectName");
-
-        // 创建OSSClient实例。
-        ossClient = new OSSClientBuilder().build(endpoint, accessKeyId, accessKeySecret);
+        this.bucketName = registryConfig.getParameter("bucketName");
+        this.objectName = registryConfig.getParameter("objectName");
 
         // 先加载一些
         if (subscribe) {
@@ -256,7 +238,6 @@ public class OssRegistry extends Registry {
             ConsumerSubEvent event = new ConsumerSubEvent(config);
             EventBus.post(event);
         }
-
         return Collections.singletonList(group);
     }
 
@@ -289,9 +270,6 @@ public class OssRegistry extends Registry {
     @Override
     public void destroy() {
         try {
-            //关闭OSS
-            ossClient.shutdown();
-
             //关闭线程
             if (scheduledExecutorService != null) {
                 scheduledExecutorService.shutdown();
@@ -322,11 +300,14 @@ public class OssRegistry extends Registry {
         if (needBackup) {
             // 得到备份的文件内容
             String content = StringUtils.defaultString(OssRegistryHelper.marshalCache(memoryCache));
-            PutObjectResult result = ossClient.putObject(bucketName, objectName, new ByteArrayInputStream(content.getBytes()));
+
+            OSS ossClient = createOssClient();
+            PutObjectResult result = ossClient.putObject(this.bucketName, this.objectName, new ByteArrayInputStream(content.getBytes()));
             if (result != null) {
                 this.latestVersionId = result.getVersionId();
                 needBackup = false;
             }
+            shudownOssClient(ossClient);
         }
     }
 
@@ -434,23 +415,19 @@ public class OssRegistry extends Registry {
     private Map<String, ProviderGroup> loadBackupFileToCache() {
         Map<String, ProviderGroup> memoryCache = new ConcurrentHashMap<String, ProviderGroup>();
         try {
-            boolean found = ossClient.doesObjectExist(bucketName, objectName);
+            OSS ossClient = createOssClient();
+
+            boolean found = ossClient.doesObjectExist(this.bucketName, this.objectName);
             if(!found) {
                 return memoryCache;
             }
 
             // ossObject包含文件所在的存储空间名称、文件名称、文件元信息以及一个输入流。
-            OSSObject ossObject = ossClient.getObject(bucketName, objectName);
+            OSSObject ossObject = ossClient.getObject(this.bucketName, this.objectName);
 
             // 读取文件内容。
             BufferedReader reader = new BufferedReader(new InputStreamReader(ossObject.getObjectContent()));
-            StringBuffer buffer = new StringBuffer();
-            String line = "";
-            while ((line = reader.readLine()) != null){
-                buffer.append(line);
-            }
-
-            Map<String, ProviderGroup> tmp = OssRegistryHelper.unMarshal(buffer.toString());
+            Map<String, ProviderGroup> tmp = OssRegistryHelper.unMarshal(readString(reader));
             if (LOGGER.isInfoEnabled()) {
                 LOGGER.info("Load backup file from {}", this.bucketName);
             }
@@ -463,6 +440,8 @@ public class OssRegistry extends Registry {
             reader.close();
             // ossObject对象使用完毕后必须关闭，否则会造成连接泄漏，导致请求无连接可用，程序无法正常工作。
             ossObject.close();
+
+            shudownOssClient(ossClient);
         } catch (OSSException oe) {
             LOGGER.info("Caught an OSSException, which means your request made it to OSS, "
                     + "but was rejected with an error response for some reason.");
@@ -480,8 +459,32 @@ public class OssRegistry extends Registry {
         return memoryCache;
     }
 
+    private String readString(BufferedReader reader) {
+        StringWriter writer = null;
+        try {
+            writer = new StringWriter();
+            char[] cbuf = new char[1024];
+            int len = 0;
+            while ((len = reader.read(cbuf)) != -1) {
+                writer.write(cbuf, 0, len);
+            }
+            return writer.toString();
+        } catch (IOException e) {
+            e.printStackTrace();
+        } finally {
+            IOUtils.closeQuietly(reader);
+            IOUtils.closeQuietly(writer);
+        }
+
+        return null;
+    }
+
     private boolean checkModified() {
-        VersionListing versionListing = ossClient.listVersions(this.bucketName, this.objectName);
+        OSS ossClient = createOssClient();
+        ListVersionsRequest listVersionsRequest = new ListVersionsRequest().withBucketName(this.bucketName);
+        VersionListing versionListing = ossClient.listVersions(listVersionsRequest);
+        shudownOssClient(ossClient);
+
         List<OSSVersionSummary> versionSummaryList = versionListing.getVersionSummaries();
         for(OSSVersionSummary item: versionSummaryList) {
             boolean isLatest = item.isLatest();
@@ -489,7 +492,22 @@ public class OssRegistry extends Registry {
                 return StringUtils.equals(this.latestVersionId, item.getVersionId());
             }
         }
-
         return false;
+    }
+
+    private OSS createOssClient() {
+        //OSS配置
+        String endpoint = registryConfig.getAddress();
+        String accessKeyId = registryConfig.getParameter("accessKeyId");
+        String accessKeySecret = registryConfig.getParameter("accessKeySecret");
+
+        // 创建OSSClient实例。
+        return new OSSClientBuilder().build(endpoint, accessKeyId, accessKeySecret);
+    }
+
+    private void shudownOssClient(OSS oss) {
+        if(oss != null) {
+            oss.shutdown();
+        }
     }
 }
