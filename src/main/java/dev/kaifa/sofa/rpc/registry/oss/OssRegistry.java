@@ -157,7 +157,7 @@ public class OssRegistry extends Registry {
 
     @Override
     public boolean start() {
-        return false;
+        return true;
     }
 
     @Override
@@ -475,10 +475,6 @@ public class OssRegistry extends Registry {
                     + "a serious internal problem while trying to communicate with OSS, "
                     + "such as not being able to access the network.");
             LOGGER.info("Error Message:" + ce.getMessage());
-        } finally {
-            if (ossClient != null) {
-                ossClient.shutdown();
-            }
         }
 
         return memoryCache;
