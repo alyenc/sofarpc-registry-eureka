@@ -88,7 +88,7 @@ public class OssRegistryHelper {
                     String pstr = fields[i];
                     if (StringUtils.isNotEmpty(pstr)) {
                         ProviderInfo providerInfo = ProviderHelper.toProviderInfo(pstr);
-                        providerInfo.setStaticAttr(ProviderInfoAttrs.ATTR_SOURCE, "local");
+                        providerInfo.setStaticAttr(ProviderInfoAttrs.ATTR_SOURCE, "oss");
                         values.add(providerInfo);
                     }
                 }
