@@ -14,8 +14,10 @@ import com.alipay.sofa.rpc.config.AbstractInterfaceConfig;
 import com.alipay.sofa.rpc.config.ConfigUniqueNameGenerator;
 import com.alipay.sofa.rpc.config.ProviderConfig;
 import com.alipay.sofa.rpc.config.ServerConfig;
+import com.alipay.sofa.rpc.context.RpcRuntimeContext;
 import com.alipay.sofa.rpc.log.Logger;
 import com.alipay.sofa.rpc.log.LoggerFactory;
+import com.aliyun.oss.OSS;
 ;
 import java.util.*;
 
@@ -53,7 +55,7 @@ public class OssRegistryHelper {
         return providerInfo;
     }
 
-    public static String marshalCache(Map<String, ProviderGroup> memoryCache) {
+    public static synchronized String marshalCache(Map<String, ProviderGroup> memoryCache) {
         StringBuilder sb = new StringBuilder();
         for (Map.Entry<String, ProviderGroup> entry : memoryCache.entrySet()) {
             ProviderGroup group = entry.getValue();
@@ -71,7 +73,7 @@ public class OssRegistryHelper {
         return sb.toString();
     }
 
-    public static Map<String, ProviderGroup> unMarshal(String context) {
+    public static synchronized Map<String, ProviderGroup> unMarshal(String context) {
         if (StringUtils.isBlank(context)) {
             return null;
         }
